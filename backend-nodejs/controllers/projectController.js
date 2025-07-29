@@ -1,13 +1,16 @@
 // controllers/projectController.js
 const Project = require('../models/Project');
+const { query } = require('../config/database');
 
 class ProjectController {
-  // Récupérer tous les projets (avec permissions)
+  // Récupérer tous les projets (avec permissions) - MÉTHODE EXISTANTE MISE À JOUR
   static async getAllProjects(req, res) {
     try {
       const userId = req.user.userId;
-      const userRole = req.user.fullUser.role_nom;
+      const userRole = req.user.fullUser ? req.user.fullUser.role_nom : req.user.role;
       const { search, status } = req.query;
+
+      console.log(`🔍 Récupération des projets pour utilisateur ${userId} (${userRole})`);
 
       let projects;
       if (search) {
@@ -30,20 +33,21 @@ class ProjectController {
       });
 
     } catch (error) {
-      console.error('Erreur lors de la récupération des projets:', error);
+      console.error('❌ Erreur lors de la récupération des projets:', error);
       res.status(500).json({
         success: false,
-        message: 'Erreur serveur lors de la récupération des projets'
+        message: 'Erreur serveur lors de la récupération des projets',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
 
-  // Récupérer un projet par ID
+  // Récupérer un projet par ID - MÉTHODE EXISTANTE MISE À JOUR
   static async getProjectById(req, res) {
     try {
       const { id } = req.params;
       const userId = req.user.userId;
-      const userRole = req.user.fullUser.role_nom;
+      const userRole = req.user.fullUser ? req.user.fullUser.role_nom : req.user.role;
 
       const project = await Project.findById(id, userId, userRole);
 
@@ -57,36 +61,53 @@ class ProjectController {
 
       res.json({
         success: true,
-        data: project
+        data: project,
+        message: 'Projet récupéré avec succès'
       });
 
     } catch (error) {
-      console.error('Erreur lors de la récupération du projet:', error);
+      console.error('❌ Erreur lors de la récupération du projet:', error);
       res.status(500).json({
         success: false,
-        message: 'Erreur serveur'
+        message: 'Erreur serveur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
 
-  // Créer un nouveau projet (Admin et PMO seulement)
+  // Créer un nouveau projet - MÉTHODE EXISTANTE AMÉLIORÉE
   static async createProject(req, res) {
     try {
-      const userRole = req.user.fullUser.role_nom;
+      const userRole = req.user.fullUser ? req.user.fullUser.role_nom : req.user.role;
+      const userId = req.user.userId;
       
-      // Vérifier les permissions de création
-      if (!['Administrateur fonctionnel', 'PMO / Directeur de projets'].includes(userRole)) {
+      console.log('🔄 Tentative de création de projet par:', req.user.email, '(', userRole, ')');
+      console.log('🔄 Données reçues:', req.body);
+
+      // Vérifier les permissions de création - Compatible avec votre logique existante
+      const allowedRoles = ['Administrateur fonctionnel', 'PMO / Directeur de projets', 'Chef de Projet'];
+      if (!allowedRoles.includes(userRole)) {
         return res.status(403).json({
           success: false,
-          message: 'Seuls les administrateurs et PMO peuvent créer des projets',
+          message: 'Vous n\'avez pas les permissions pour créer des projets',
           user_role: userRole,
-          required_roles: ['Administrateur fonctionnel', 'PMO / Directeur de projets']
+          required_roles: allowedRoles
         });
       }
 
-      const { nom, description, chef_projet_id, direction_id, statut_id, budget, date_debut, date_fin_prevue, priorite } = req.body;
+      const { 
+        nom, 
+        description, 
+        chef_projet_id, 
+        direction_id, 
+        statut_id, 
+        budget, 
+        date_debut, 
+        date_fin_prevue, 
+        priorite 
+      } = req.body;
 
-      // Validation des données
+      // Validation des données obligatoires
       if (!nom || !chef_projet_id || !direction_id || !statut_id) {
         return res.status(400).json({
           success: false,
@@ -94,19 +115,62 @@ class ProjectController {
         });
       }
 
+      // Validation des relations (vérifier que les IDs existent)
+      const [chefExists] = await query('SELECT id FROM utilisateurs WHERE id = ? AND statut = "Actif"', [chef_projet_id]);
+      const [directionExists] = await query('SELECT id FROM directions WHERE id = ?', [direction_id]);
+      const [statutExists] = await query('SELECT id FROM statuts_projet WHERE id = ?', [statut_id]);
+
+      if (chefExists.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Chef de projet introuvable ou inactif'
+        });
+      }
+
+      if (directionExists.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Direction introuvable'
+        });
+      }
+
+      if (statutExists.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Statut introuvable'
+        });
+      }
+
+      // Si c'est un chef de projet, il ne peut se désigner que lui-même (optionnel selon vos règles)
+      if (userRole === 'Chef de Projet' && parseInt(chef_projet_id) !== parseInt(userId)) {
+        return res.status(403).json({
+          success: false,
+          message: 'En tant que Chef de Projet, vous ne pouvez vous désigner que vous-même comme chef de projet'
+        });
+      }
+
+      // Préparer les données du projet
       const projectData = {
-        nom,
-        description,
+        nom: nom.trim(),
+        description: description ? description.trim() : null,
         chef_projet_id: parseInt(chef_projet_id),
         direction_id: parseInt(direction_id),
         statut_id: parseInt(statut_id),
         budget: budget ? parseFloat(budget) : null,
-        date_debut,
-        date_fin_prevue,
-        priorite
+        date_debut: date_debut || null,
+        date_fin_prevue: date_fin_prevue || null,
+        priorite: priorite || 'Normale'
       };
 
+      console.log('🔄 Création de projet avec données:', projectData);
+
+      // Créer le projet en utilisant votre méthode existante
       const projectId = await Project.create(projectData);
+
+      console.log('✅ Projet créé avec ID:', projectId);
+
+      // Récupérer le projet créé pour le retourner complet
+      const createdProject = await Project.findById(projectId, userId, userRole);
 
       // Log pour audit
       console.log(`✅ Nouveau projet créé par ${req.user.email}: "${nom}" (ID: ${projectId})`);
@@ -114,24 +178,25 @@ class ProjectController {
       res.status(201).json({
         success: true,
         message: 'Projet créé avec succès',
-        data: { id: projectId }
+        data: createdProject || { id: projectId }
       });
 
     } catch (error) {
-      console.error('Erreur lors de la création du projet:', error);
+      console.error('❌ Erreur lors de la création du projet:', error);
       res.status(500).json({
         success: false,
-        message: 'Erreur serveur lors de la création'
+        message: 'Erreur serveur lors de la création',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
 
-  // Mettre à jour un projet
+  // Mettre à jour un projet - MÉTHODE EXISTANTE MISE À JOUR
   static async updateProject(req, res) {
     try {
       const { id } = req.params;
       const userId = req.user.userId;
-      const userRole = req.user.fullUser.role_nom;
+      const userRole = req.user.fullUser ? req.user.fullUser.role_nom : req.user.role;
       const updateData = req.body;
 
       // Vérifier si le projet existe et si l'utilisateur peut le modifier
@@ -167,24 +232,26 @@ class ProjectController {
 
       res.json({
         success: true,
-        message: 'Projet mis à jour avec succès'
+        message: 'Projet mis à jour avec succès',
+        data: updated
       });
 
     } catch (error) {
-      console.error('Erreur lors de la mise à jour du projet:', error);
+      console.error('❌ Erreur lors de la mise à jour du projet:', error);
       res.status(500).json({
         success: false,
-        message: 'Erreur serveur'
+        message: 'Erreur serveur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
 
-  // Supprimer un projet (Admin et PMO seulement)
+  // Supprimer un projet - MÉTHODE EXISTANTE MISE À JOUR
   static async deleteProject(req, res) {
     try {
       const { id } = req.params;
       const userId = req.user.userId;
-      const userRole = req.user.fullUser.role_nom;
+      const userRole = req.user.fullUser ? req.user.fullUser.role_nom : req.user.role;
 
       // Vérifier les permissions de suppression
       if (!['Administrateur fonctionnel', 'PMO / Directeur de projets'].includes(userRole)) {
@@ -201,6 +268,15 @@ class ProjectController {
         return res.status(404).json({
           success: false,
           message: 'Projet non trouvé'
+        });
+      }
+
+      // Vérifier s'il y a des tâches liées
+      const [tasks] = await query('SELECT COUNT(*) as count FROM taches WHERE projet_id = ?', [id]);
+      if (tasks[0].count > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Impossible de supprimer un projet qui contient des tâches'
         });
       }
 
@@ -222,42 +298,45 @@ class ProjectController {
       });
 
     } catch (error) {
-      console.error('Erreur lors de la suppression du projet:', error);
+      console.error('❌ Erreur lors de la suppression du projet:', error);
       res.status(500).json({
         success: false,
-        message: 'Erreur serveur'
+        message: 'Erreur serveur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
 
-  // Statistiques des projets
+  // Statistiques des projets - MÉTHODE EXISTANTE MISE À JOUR
   static async getProjectStats(req, res) {
     try {
       const userId = req.user.userId;
-      const userRole = req.user.fullUser.role_nom;
+      const userRole = req.user.fullUser ? req.user.fullUser.role_nom : req.user.role;
 
       const stats = await Project.getStats(userId, userRole);
 
       res.json({
         success: true,
         data: stats,
-        user_role: userRole
+        user_role: userRole,
+        message: 'Statistiques récupérées avec succès'
       });
 
     } catch (error) {
-      console.error('Erreur lors de la récupération des statistiques:', error);
+      console.error('❌ Erreur lors de la récupération des statistiques:', error);
       res.status(500).json({
         success: false,
-        message: 'Erreur serveur'
+        message: 'Erreur serveur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
 
-  // Projets récents
+  // Projets récents - NOUVELLE MÉTHODE
   static async getRecentProjects(req, res) {
     try {
       const userId = req.user.userId;
-      const userRole = req.user.fullUser.role_nom;
+      const userRole = req.user.fullUser ? req.user.fullUser.role_nom : req.user.role;
       const limit = parseInt(req.query.limit) || 5;
 
       const projects = await Project.getRecent(limit, userId, userRole);
@@ -265,23 +344,25 @@ class ProjectController {
       res.json({
         success: true,
         data: projects,
-        count: projects.length
+        count: projects.length,
+        message: `${projects.length} projets récents récupérés`
       });
 
     } catch (error) {
-      console.error('Erreur lors de la récupération des projets récents:', error);
+      console.error('❌ Erreur lors de la récupération des projets récents:', error);
       res.status(500).json({
         success: false,
-        message: 'Erreur serveur'
+        message: 'Erreur serveur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
 
-  // Tableau de bord des projets pour l'utilisateur connecté
+  // Tableau de bord des projets pour l'utilisateur connecté - MÉTHODE EXISTANTE MISE À JOUR
   static async getDashboard(req, res) {
     try {
       const userId = req.user.userId;
-      const userRole = req.user.fullUser.role_nom;
+      const userRole = req.user.fullUser ? req.user.fullUser.role_nom : req.user.role;
 
       // Récupérer différentes métriques
       const [stats, recentProjects, myProjects] = await Promise.all([
@@ -297,14 +378,16 @@ class ProjectController {
           recent_projects: recentProjects,
           my_projects: myProjects,
           user_role: userRole
-        }
+        },
+        message: 'Tableau de bord récupéré avec succès'
       });
 
     } catch (error) {
-      console.error('Erreur lors de la récupération du dashboard:', error);
+      console.error('❌ Erreur lors de la récupération du dashboard:', error);
       res.status(500).json({
         success: false,
-        message: 'Erreur serveur'
+        message: 'Erreur serveur',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
   }
