@@ -231,5 +231,123 @@ router.get('/me/profile', authenticateToken, async (req, res) => {
     });
   }
 });
+router.post('/', authenticateToken, canManageUsers, async (req, res) => {
+  try {
+    const { nom, email, password, role_id, direction_id } = req.body;
+
+    // Validation des données
+    if (!nom || !email || !password || !role_id || !direction_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tous les champs sont requis'
+      });
+    }
+
+    // Vérifier si l'email existe déjà
+    const existingUser = await User.findByEmail(email);
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Un utilisateur avec cet email existe déjà'
+      });
+    }
+
+    // Hasher le mot de passe
+    const saltRounds = 10;
+    const password_hash = await bcrypt.hash(password, saltRounds);
+
+    // Créer l'utilisateur
+    const userId = await User.create({
+      nom,
+      email,
+      password_hash,
+      role_id,
+      direction_id,
+      statut: 'Actif'
+    });
+
+    // Récupérer l'utilisateur créé avec toutes les informations
+    const newUser = await User.findById(userId);
+    
+    // Supprimer le hash du mot de passe dans la réponse
+    const { password_hash: _, ...userWithoutPassword } = newUser;
+
+    // Log pour audit
+    console.log(`✅ Nouvel utilisateur créé par ${req.user.email}: ${nom} (${email})`);
+
+    res.status(201).json({
+      success: true,
+      message: 'Utilisateur créé avec succès',
+      data: userWithoutPassword
+    });
+
+  } catch (error) {
+    console.error('Erreur lors de la création de l\'utilisateur:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur serveur lors de la création'
+    });
+  }
+});
+
+// PUT /api/users/:id/password - Changer le mot de passe d'un utilisateur (ADMIN SEULEMENT)
+router.put('/:id/password', authenticateToken, canManageUsers, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Le mot de passe est requis'
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Le mot de passe doit contenir au moins 6 caractères'
+      });
+    }
+
+    // Vérifier si l'utilisateur existe
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilisateur non trouvé'
+      });
+    }
+
+    // Hasher le nouveau mot de passe
+    const saltRounds = 10;
+    const password_hash = await bcrypt.hash(password, saltRounds);
+
+    // Mettre à jour le mot de passe
+    const updated = await User.update(id, { password_hash });
+    
+    if (!updated) {
+      return res.status(400).json({
+        success: false,
+        message: 'Erreur lors de la mise à jour du mot de passe'
+      });
+    }
+
+    // Log pour audit
+    console.log(`🔒 Mot de passe changé pour l'utilisateur ${user.nom} par ${req.user.email}`);
+
+    res.json({
+      success: true,
+      message: 'Mot de passe mis à jour avec succès'
+    });
+
+  } catch (error) {
+    console.error('Erreur lors du changement de mot de passe:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur serveur'
+    });
+  }
+});
 
 module.exports = router;
