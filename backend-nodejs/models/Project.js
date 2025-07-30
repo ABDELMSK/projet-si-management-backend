@@ -3,49 +3,30 @@ const { query } = require('../config/database');
 
 class Project {
   // Créer un nouveau projet
-  static async create(projectData) {
-    try {
-      const {
-        nom, description, chef_projet_id, direction_id, statut_id,
-        budget, date_debut, date_fin_prevue, priorite
-      } = projectData;
-      
-      console.log('🔄 Project.create - Début création avec:', projectData);
-      
-      const sql = `
-        INSERT INTO projets (
-          nom, description, chef_projet_id, direction_id, statut_id, 
-          budget, date_debut, date_fin_prevue, priorite, pourcentage_avancement, created_at, updated_at
-        ) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())
-      `;
-      
-      const params = [
-        nom, 
-        description || null, 
-        chef_projet_id, 
-        direction_id, 
-        statut_id,
-        budget || null, 
-        date_debut || null, 
-        date_fin_prevue || null, 
-        priorite || 'Normale'
-      ];
-      
-      console.log('🔄 SQL:', sql);
-      console.log('🔄 Paramètres:', params);
-      
-      const result = await query(sql, params);
-      
-      console.log('✅ Résultat insertion:', result);
-      console.log('✅ ID du projet créé:', result.insertId);
-      
-      return result.insertId;
-      
-    } catch (error) {
-      console.error('❌ Erreur Project.create:', error);
-      throw error;
-    }
+   static async create(projectData) {
+    // Database insertion logic
+    const query = `
+      INSERT INTO projets (
+        nom, code, description, chef_projet_id, direction_id, 
+        statut_id, budget, date_debut, date_fin_prevue, priorite, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `;
+
+    const values = [
+      projectData.nom,
+      projectData.code,
+      projectData.description,
+      projectData.chef_projet_id,
+      projectData.direction_id,
+      projectData.statut_id,
+      projectData.budget,
+      projectData.date_debut,
+      projectData.date_fin_prevue,
+      projectData.priorite
+    ];
+
+    const result = await db.execute(query, values);
+    return result.insertId;
   }
 
   // Récupérer tous les projets (SIMPLIFIÉ pour debug)
@@ -104,39 +85,26 @@ class Project {
   }
 
   // Trouver un projet par ID
-  static async findById(id, userId = null, userRole = null) {
-    try {
-      const sql = `
-        SELECT p.*, 
-               u.nom as chef_projet_nom,
-               u.email as chef_projet_email,
-               d.nom as direction_nom,
-               s.nom as statut_nom,
-               s.couleur as statut_couleur
-        FROM projets p
-        LEFT JOIN utilisateurs u ON p.chef_projet_id = u.id
-        LEFT JOIN directions d ON p.direction_id = d.id
-        LEFT JOIN statuts_projet s ON p.statut_id = s.id
-        WHERE p.id = ?
-      `;
-      
-      const results = await query(sql, [id]);
-      const project = results[0] || null;
-      
-      if (!project) return null;
-      
-      // Vérifier les permissions d'accès
-      if (userRole === 'Chef de Projet' && project.chef_projet_id !== userId) {
-        console.log(`❌ Accès refusé: Chef ${userId} essaie d'accéder au projet du chef ${project.chef_projet_id}`);
-        return null;
-      }
-      
-      return project;
-    } catch (error) {
-      console.error('❌ Erreur Project.findById:', error);
-      throw error;
-    }
+  static async findById(id, userId, userRole) {
+    const query = `
+      SELECT 
+        p.*,
+        u.nom as chef_projet_nom,
+        u.email as chef_projet_email,
+        d.nom as direction_nom,
+        s.nom as statut_nom,
+        s.couleur as statut_couleur
+      FROM projets p
+      LEFT JOIN utilisateurs u ON p.chef_projet_id = u.id
+      LEFT JOIN directions d ON p.direction_id = d.id
+      LEFT JOIN statuts s ON p.statut_id = s.id
+      WHERE p.id = ?
+    `;
+
+    const [rows] = await db.execute(query, [id]);
+    return rows[0] || null;
   }
+
 
   // Mettre à jour un projet
   static async update(id, projectData, userId = null, userRole = null) {
@@ -268,7 +236,7 @@ class Project {
     try {
       let sql = `
         SELECT p.id, p.nom, p.pourcentage_avancement, s.nom as statut_nom, s.couleur as statut_couleur,
-               u.nom as chef_projet_nom, p.updated_at
+              u.nom as chef_projet_nom, p.updated_at
         FROM projets p
         LEFT JOIN utilisateurs u ON p.chef_projet_id = u.id
         LEFT JOIN statuts_projet s ON p.statut_id = s.id
@@ -320,6 +288,7 @@ class Project {
       throw error;
     }
   }
+  
 }
 
 module.exports = Project;

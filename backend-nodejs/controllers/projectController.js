@@ -76,27 +76,11 @@ class ProjectController {
   }
 
   // Créer un nouveau projet - MÉTHODE EXISTANTE AMÉLIORÉE
-  static async createProject(req, res) {
+ static async createProject(req, res) {
     try {
-      const userRole = req.user.fullUser ? req.user.fullUser.role_nom : req.user.role;
-      const userId = req.user.userId;
-      
-      console.log('🔄 Tentative de création de projet par:', req.user.email, '(', userRole, ')');
-      console.log('🔄 Données reçues:', req.body);
-
-      // Vérifier les permissions de création - Compatible avec votre logique existante
-      const allowedRoles = ['Administrateur fonctionnel', 'PMO / Directeur de projets', 'Chef de Projet'];
-      if (!allowedRoles.includes(userRole)) {
-        return res.status(403).json({
-          success: false,
-          message: 'Vous n\'avez pas les permissions pour créer des projets',
-          user_role: userRole,
-          required_roles: allowedRoles
-        });
-      }
-
       const { 
         nom, 
+        code, 
         description, 
         chef_projet_id, 
         direction_id, 
@@ -107,51 +91,21 @@ class ProjectController {
         priorite 
       } = req.body;
 
-      // Validation des données obligatoires
-      if (!nom || !chef_projet_id || !direction_id || !statut_id) {
+      const userId = req.user.userId;
+      const userRole = req.user.fullUser ? req.user.fullUser.role : req.user.role;
+
+      // Validation des champs obligatoires
+      if (!nom || !code || !chef_projet_id || !direction_id || !statut_id) {
         return res.status(400).json({
           success: false,
-          message: 'Les champs nom, chef_projet_id, direction_id et statut_id sont requis'
-        });
-      }
-
-      // Validation des relations (vérifier que les IDs existent)
-      const [chefExists] = await query('SELECT id FROM utilisateurs WHERE id = ? AND statut = "Actif"', [chef_projet_id]);
-      const [directionExists] = await query('SELECT id FROM directions WHERE id = ?', [direction_id]);
-      const [statutExists] = await query('SELECT id FROM statuts_projet WHERE id = ?', [statut_id]);
-
-      if (chefExists.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Chef de projet introuvable ou inactif'
-        });
-      }
-
-      if (directionExists.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Direction introuvable'
-        });
-      }
-
-      if (statutExists.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Statut introuvable'
-        });
-      }
-
-      // Si c'est un chef de projet, il ne peut se désigner que lui-même (optionnel selon vos règles)
-      if (userRole === 'Chef de Projet' && parseInt(chef_projet_id) !== parseInt(userId)) {
-        return res.status(403).json({
-          success: false,
-          message: 'En tant que Chef de Projet, vous ne pouvez vous désigner que vous-même comme chef de projet'
+          message: 'Les champs nom, code, chef de projet, direction et statut sont obligatoires'
         });
       }
 
       // Préparer les données du projet
       const projectData = {
         nom: nom.trim(),
+        code: code.trim(),
         description: description ? description.trim() : null,
         chef_projet_id: parseInt(chef_projet_id),
         direction_id: parseInt(direction_id),
@@ -164,7 +118,7 @@ class ProjectController {
 
       console.log('🔄 Création de projet avec données:', projectData);
 
-      // Créer le projet en utilisant votre méthode existante
+      // Créer le projet
       const projectId = await Project.create(projectData);
 
       console.log('✅ Projet créé avec ID:', projectId);
